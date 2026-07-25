@@ -28,17 +28,14 @@ def build_exe():
         'png_to_jpg_converter.py',           # 主脚本
         '--name=PNG转JPG转换器',              # exe 名称
         '--onefile',                          # 打包成单个文件
-        '--windowed',                         # 不显示控制台窗口
+        # '--windowed',                       # 注释掉这行，显示控制台窗口用于调试
         '--clean',                            # 清理临时文件
         '--noconfirm',                        # 不询问确认
-        '--add-data=README.md;.',             # 添加说明文件
+        # '--add-data=README.md;.',           # 注释掉，避免打包问题
     ]
     
     # Windows 特定设置
     if platform.system() == 'Windows':
-        # Windows 上使用分号作为分隔符
-        args.append('--add-data=README.md;.')
-        
         # 如果有图标文件，添加图标
         if os.path.exists('icon.ico'):
             args.append('--icon=icon.ico')
