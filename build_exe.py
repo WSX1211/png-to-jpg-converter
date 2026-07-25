@@ -10,6 +10,12 @@ import os
 import sys
 import platform
 
+# 解决 Windows 控制台编码问题
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 def build_exe():
     """打包成 exe"""
     print("=" * 60)
