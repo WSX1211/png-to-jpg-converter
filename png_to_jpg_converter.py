@@ -375,8 +375,11 @@ class PNGtoJPGConverter:
                 self.queue_messagebox_info("没有找到有效的PNG文件")
                 return
             
+            # 按修改时间排序
+            png_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            
             self.queue_log(f"\n{'='*60}")
-            self.queue_log(f"开始处理 {len(png_files)} 个文件")
+            self.queue_log(f"开始处理 {len(png_files)} 个文件（按修改日期排序）")
             
             # 确定输出文件夹（使用第一个文件的父目录）
             output_folder = png_files[0].parent / "jpg_output"
@@ -392,12 +395,21 @@ class PNGtoJPGConverter:
             
             for i, png_file in enumerate(png_files, 1):
                 try:
+                    # 获取文件修改时间
+                    import time
+                    mtime = png_file.stat().st_mtime
+                    mtime_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
+                    
                     # 转换图片
                     jpg_file = output_folder / (png_file.stem + ".jpg")
                     self.convert_png_to_jpg(png_file, jpg_file)
                     
+                    # 保持原文件的修改时间
+                    import os
+                    os.utime(jpg_file, (mtime, mtime))
+                    
                     success_count += 1
-                    self.queue_log(f"✓ [{i}/{len(png_files)}] {png_file.name} -> {jpg_file.name}")
+                    self.queue_log(f"✓ [{i}/{len(png_files)}] {png_file.name} (修改: {mtime_str}) -> {jpg_file.name}")
                     
                 except Exception as e:
                     error_count += 1
@@ -413,11 +425,12 @@ class PNGtoJPGConverter:
             self.queue_log(f"成功: {success_count} 个")
             self.queue_log(f"失败: {error_count} 个")
             self.queue_log(f"输出位置: {output_folder}")
+            self.queue_log(f"💡 已按修改日期排序处理，并保持原文件修改时间")
             self.queue_log(f"{'='*60}\n")
             
             # 显示完成消息
             self.queue_messagebox_info(
-                f"转换完成!\n\n成功: {success_count} 个\n失败: {error_count} 个\n\n输出文件夹:\n{output_folder}"
+                f"转换完成!\n\n成功: {success_count} 个\n失败: {error_count} 个\n\n输出文件夹:\n{output_folder}\n\n💡 已按修改日期排序并保持原文件修改时间"
             )
             
         except Exception as e:
@@ -436,9 +449,12 @@ class PNGtoJPGConverter:
                 self.queue_messagebox_info(f"文件夹中没有找到PNG图片:\n{folder_path}")
                 return
             
+            # 按修改时间排序
+            png_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            
             self.queue_log(f"\n{'='*60}")
             self.queue_log(f"开始处理文件夹: {folder_path}")
-            self.queue_log(f"找到 {len(png_files)} 个PNG文件")
+            self.queue_log(f"找到 {len(png_files)} 个PNG文件（按修改日期排序）")
             
             # 创建输出文件夹
             output_folder = folder_path / "jpg_output"
@@ -454,12 +470,21 @@ class PNGtoJPGConverter:
             
             for i, png_file in enumerate(png_files, 1):
                 try:
+                    # 获取文件修改时间
+                    import time
+                    mtime = png_file.stat().st_mtime
+                    mtime_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
+                    
                     # 转换图片
                     jpg_file = output_folder / (png_file.stem + ".jpg")
                     self.convert_png_to_jpg(png_file, jpg_file)
                     
+                    # 保持原文件的修改时间
+                    import os
+                    os.utime(jpg_file, (mtime, mtime))
+                    
                     success_count += 1
-                    self.queue_log(f"✓ [{i}/{len(png_files)}] {png_file.name} -> {jpg_file.name}")
+                    self.queue_log(f"✓ [{i}/{len(png_files)}] {png_file.name} (修改: {mtime_str}) -> {jpg_file.name}")
                     
                 except Exception as e:
                     error_count += 1
@@ -475,11 +500,12 @@ class PNGtoJPGConverter:
             self.queue_log(f"成功: {success_count} 个")
             self.queue_log(f"失败: {error_count} 个")
             self.queue_log(f"输出位置: {output_folder}")
+            self.queue_log(f"💡 已按修改日期排序处理，并保持原文件修改时间")
             self.queue_log(f"{'='*60}\n")
             
             # 显示完成消息
             self.queue_messagebox_info(
-                f"转换完成!\n\n成功: {success_count} 个\n失败: {error_count} 个\n\n输出文件夹:\n{output_folder}"
+                f"转换完成!\n\n成功: {success_count} 个\n失败: {error_count} 个\n\n输出文件夹:\n{output_folder}\n\n💡 已按修改日期排序并保持原文件修改时间"
             )
             
         except Exception as e:
