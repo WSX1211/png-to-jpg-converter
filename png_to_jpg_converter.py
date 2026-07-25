@@ -134,6 +134,15 @@ class PNGtoJPGConverter:
             width=15
         )
         self.select_folder_btn.pack(side=tk.LEFT, padx=5)
+
+        # 在主要操作区提供显眼的周报入口，避免底部按钮受显示缩放影响
+        self.weekly_report_top_btn = ttk.Button(
+            button_frame,
+            text="周报合并",
+            command=self.open_weekly_report,
+            width=15
+        )
+        self.weekly_report_top_btn.pack(side=tk.LEFT, padx=5)
         
         # 进度条框架
         progress_frame = ttk.Frame(main_frame)
