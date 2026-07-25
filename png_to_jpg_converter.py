@@ -12,7 +12,7 @@ from PIL import Image
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
-import traceback
+import queue
 
 
 class PNGtoJPGConverter:
@@ -22,21 +22,55 @@ class PNGtoJPGConverter:
         self.root.geometry("700x550")
         self.root.resizable(True, True)
         
+        # 创建消息队列用于线程间通信
+        self.msg_queue = queue.Queue()
+        
         # 初始化变量
         self.use_tkdnd = False
         
         try:
             self.setup_ui()
             self.setup_drag_drop()
+            
+            # 启动队列检查
+            self.check_queue()
+            
             self.log("✓ 程序启动成功")
             self.log("💡 使用说明:")
-            self.log("  - 点击「选择文件」选择单个PNG文件")
+            self.log("  - 点击「选择文件」选择单个或多个PNG文件")
             self.log("  - 点击「选择文件夹」批量转换整个文件夹")
             self.log("  - 或直接拖拽文件/文件夹到窗口")
         except Exception as e:
             print(f"初始化失败: {e}")
-            traceback.print_exc()
             messagebox.showerror("初始化错误", f"程序初始化失败:\n{str(e)}")
+    
+    def check_queue(self):
+        """检查消息队列，处理来自后台线程的消息"""
+        try:
+            while True:
+                try:
+                    msg = self.msg_queue.get_nowait()
+                    msg_type = msg.get('type', '')
+                    
+                    if msg_type == 'log':
+                        self.log_text.insert(tk.END, msg['text'] + "\n")
+                        self.log_text.see(tk.END)
+                    elif msg_type == 'progress':
+                        self.progress['value'] = msg['value']
+                    elif msg_type == 'progress_max':
+                        self.progress['maximum'] = msg['value']
+                    elif msg_type == 'progress_label':
+                        self.progress_label.config(text=msg['text'])
+                    elif msg_type == 'messagebox_info':
+                        messagebox.showinfo("完成", msg['text'])
+                    elif msg_type == 'messagebox_error':
+                        messagebox.showerror("错误", msg['text'])
+                        
+                except queue.Empty:
+                    break
+        finally:
+            # 每100ms检查一次队列
+            self.root.after(100, self.check_queue)
         
     def setup_ui(self):
         """设置界面"""
@@ -172,6 +206,9 @@ class PNGtoJPGConverter:
             self.use_tkdnd = True
             self.log("✓ 已启用拖拽功能")
             
+            # 重新启动队列检查
+            self.check_queue()
+            
         except ImportError:
             self.use_tkdnd = False
             self.log("⚠ 未安装 tkinterdnd2，拖拽功能不可用")
@@ -208,8 +245,8 @@ class PNGtoJPGConverter:
             # 恢复界面
             self.on_drag_leave(None)
         except Exception as e:
-            self.log(f"处理拖拽错误: {str(e)}")
-            messagebox.showerror("错误", f"处理拖拽失败:\n{str(e)}")
+            self.queue_log(f"处理拖拽错误: {str(e)}")
+            self.queue_messagebox_error(f"处理拖拽失败:\n{str(e)}")
     
     def select_file(self):
         """选择单个文件"""
@@ -220,26 +257,30 @@ class PNGtoJPGConverter:
             )
             
             if file_paths:
-                self.log(f"选择了 {len(file_paths)} 个文件")
+                self.queue_log(f"选择了 {len(file_paths)} 个文件")
                 
                 # 在新线程中批量处理
-                thread = threading.Thread(target=self._process_multiple_files_thread, args=(file_paths,))
+                thread = threading.Thread(target=self._process_files_thread, args=(file_paths,))
                 thread.daemon = True
                 thread.start()
         except Exception as e:
-            self.log(f"选择文件错误: {str(e)}")
-            messagebox.showerror("错误", f"选择文件失败:\n{str(e)}")
+            self.queue_log(f"选择文件错误: {str(e)}")
+            self.queue_messagebox_error(f"选择文件失败:\n{str(e)}")
     
     def select_folder(self):
         """选择文件夹"""
         try:
             folder_path = filedialog.askdirectory(title="选择包含PNG图片的文件夹")
             if folder_path:
-                self.log(f"选择的文件夹: {folder_path}")
-                self.process_path(folder_path)
+                self.queue_log(f"选择的文件夹: {folder_path}")
+                
+                # 在新线程中处理
+                thread = threading.Thread(target=self._process_folder_thread, args=(folder_path,))
+                thread.daemon = True
+                thread.start()
         except Exception as e:
-            self.log(f"选择文件夹错误: {str(e)}")
-            messagebox.showerror("错误", f"选择文件夹失败:\n{str(e)}")
+            self.queue_log(f"选择文件夹错误: {str(e)}")
+            self.queue_messagebox_error(f"选择文件夹失败:\n{str(e)}")
     
     def process_path(self, path):
         """处理文件或文件夹路径"""
@@ -247,77 +288,75 @@ class PNGtoJPGConverter:
             path = Path(path)
             
             if not path.exists():
-                messagebox.showerror("错误", f"路径不存在: {path}")
+                self.queue_messagebox_error(f"路径不存在: {path}")
                 return
             
             # 判断是文件还是文件夹
             if path.is_file():
                 # 单个文件
                 if path.suffix.lower() == '.png':
-                    self.process_single_file(path)
+                    thread = threading.Thread(target=self._process_files_thread, args=([str(path)],))
+                    thread.daemon = True
+                    thread.start()
                 else:
-                    messagebox.showwarning("警告", f"不支持的文件格式: {path.suffix}\n请选择PNG文件")
+                    self.queue_messagebox_error(f"不支持的文件格式: {path.suffix}\n请选择PNG文件")
             elif path.is_dir():
                 # 文件夹
-                self.process_folder(path)
+                thread = threading.Thread(target=self._process_folder_thread, args=(str(path),))
+                thread.daemon = True
+                thread.start()
             else:
-                messagebox.showerror("错误", f"未知的路径类型: {path}")
+                self.queue_messagebox_error(f"未知的路径类型: {path}")
                 
         except Exception as e:
-            self.log(f"处理路径错误: {str(e)}")
-            messagebox.showerror("错误", f"处理路径失败:\n{str(e)}")
+            self.queue_log(f"处理路径错误: {str(e)}")
+            self.queue_messagebox_error(f"处理路径失败:\n{str(e)}")
     
-    def process_single_file(self, png_path):
-        """处理单个PNG文件"""
-        try:
-            self.log(f"\n处理文件: {png_path.name}")
-            
-            # 创建输出路径（同一目录下的jpg_output文件夹）
-            output_folder = png_path.parent / "jpg_output"
-            output_folder.mkdir(exist_ok=True)
-            
-            jpg_path = output_folder / (png_path.stem + ".jpg")
-            
-            # 转换
-            self.convert_png_to_jpg(png_path, jpg_path)
-            
-            self.log(f"✓ 转换成功: {jpg_path}")
-            return True, jpg_path
-            
-        except Exception as e:
-            self.log(f"✗ 转换失败: {str(e)}")
-            return False, str(e)
+    def queue_log(self, message):
+        """将日志消息放入队列"""
+        print(message)  # 同时输出到控制台
+        self.msg_queue.put({'type': 'log', 'text': message})
     
-    def process_folder(self, folder_path):
-        """处理文件夹"""
-        try:
-            # 在新线程中处理，避免界面卡顿
-            thread = threading.Thread(target=self._process_folder_thread, args=(folder_path,))
-            thread.daemon = True
-            thread.start()
-        except Exception as e:
-            self.log(f"启动处理线程错误: {str(e)}")
-            messagebox.showerror("错误", f"启动处理失败:\n{str(e)}")
+    def queue_progress(self, value):
+        """将进度更新放入队列"""
+        self.msg_queue.put({'type': 'progress', 'value': value})
     
-    def _process_multiple_files_thread(self, file_paths):
+    def queue_progress_max(self, value):
+        """将进度最大值更新放入队列"""
+        self.msg_queue.put({'type': 'progress_max', 'value': value})
+    
+    def queue_progress_label(self, text):
+        """将进度标签更新放入队列"""
+        self.msg_queue.put({'type': 'progress_label', 'text': text})
+    
+    def queue_messagebox_info(self, text):
+        """将信息对话框放入队列"""
+        self.msg_queue.put({'type': 'messagebox_info', 'text': text})
+    
+    def queue_messagebox_error(self, text):
+        """将错误对话框放入队列"""
+        self.msg_queue.put({'type': 'messagebox_error', 'text': text})
+    
+    def _process_files_thread(self, file_paths):
         """在后台线程中处理多个文件"""
         try:
             png_files = [Path(fp) for fp in file_paths if Path(fp).suffix.lower() == '.png']
             
             if not png_files:
-                self.root.after(0, lambda: messagebox.showinfo("提示", "没有找到有效的PNG文件"))
+                self.queue_messagebox_info("没有找到有效的PNG文件")
                 return
             
-            self.log(f"\n{'='*60}")
-            self.log(f"开始处理 {len(png_files)} 个文件")
+            self.queue_log(f"\n{'='*60}")
+            self.queue_log(f"开始处理 {len(png_files)} 个文件")
             
             # 确定输出文件夹（使用第一个文件的父目录）
             output_folder = png_files[0].parent / "jpg_output"
             output_folder.mkdir(exist_ok=True)
-            self.log(f"输出文件夹: {output_folder}")
+            self.queue_log(f"输出文件夹: {output_folder}")
             
             # 设置进度条
-            self.root.after(0, lambda: self.progress.config(maximum=len(png_files), value=0))
+            self.queue_progress_max(len(png_files))
+            self.queue_progress(0)
             
             success_count = 0
             error_count = 0
@@ -329,56 +368,57 @@ class PNGtoJPGConverter:
                     self.convert_png_to_jpg(png_file, jpg_file)
                     
                     success_count += 1
-                    self.log(f"✓ [{i}/{len(png_files)}] {png_file.name} -> {jpg_file.name}")
+                    self.queue_log(f"✓ [{i}/{len(png_files)}] {png_file.name} -> {jpg_file.name}")
                     
                 except Exception as e:
                     error_count += 1
-                    self.log(f"✗ [{i}/{len(png_files)}] {png_file.name} - {str(e)}")
+                    self.queue_log(f"✗ [{i}/{len(png_files)}] {png_file.name} - {str(e)}")
                 
                 # 更新进度
-                self.root.after(0, lambda v=i: self.progress.config(value=v))
-                self.root.after(0, lambda v=i, t=len(png_files): self.progress_label.config(text=f"{v}/{t}"))
+                self.queue_progress(i)
+                self.queue_progress_label(f"{i}/{len(png_files)}")
             
             # 完成
-            self.log(f"\n{'='*60}")
-            self.log(f"转换完成!")
-            self.log(f"成功: {success_count} 个")
-            self.log(f"失败: {error_count} 个")
-            self.log(f"输出位置: {output_folder}")
-            self.log(f"{'='*60}\n")
+            self.queue_log(f"\n{'='*60}")
+            self.queue_log(f"转换完成!")
+            self.queue_log(f"成功: {success_count} 个")
+            self.queue_log(f"失败: {error_count} 个")
+            self.queue_log(f"输出位置: {output_folder}")
+            self.queue_log(f"{'='*60}\n")
             
             # 显示完成消息
-            self.root.after(0, lambda: messagebox.showinfo(
-                "完成", 
+            self.queue_messagebox_info(
                 f"转换完成!\n\n成功: {success_count} 个\n失败: {error_count} 个\n\n输出文件夹:\n{output_folder}"
-            ))
+            )
             
         except Exception as e:
-            self.log(f"处理过程中出错: {str(e)}")
-            self.log(traceback.format_exc())
-            self.root.after(0, lambda: messagebox.showerror("错误", f"处理过程中出错:\n{str(e)}"))
+            self.queue_log(f"处理过程中出错: {str(e)}")
+            self.queue_messagebox_error(f"处理过程中出错:\n{str(e)}")
     
     def _process_folder_thread(self, folder_path):
         """在后台线程中处理文件夹"""
         try:
+            folder_path = Path(folder_path)
+            
             # 查找所有 PNG 文件
             png_files = list(folder_path.glob("*.png")) + list(folder_path.glob("*.PNG"))
             
             if not png_files:
-                self.root.after(0, lambda: messagebox.showinfo("提示", f"文件夹中没有找到PNG图片:\n{folder_path}"))
+                self.queue_messagebox_info(f"文件夹中没有找到PNG图片:\n{folder_path}")
                 return
             
-            self.log(f"\n{'='*60}")
-            self.log(f"开始处理文件夹: {folder_path}")
-            self.log(f"找到 {len(png_files)} 个PNG文件")
+            self.queue_log(f"\n{'='*60}")
+            self.queue_log(f"开始处理文件夹: {folder_path}")
+            self.queue_log(f"找到 {len(png_files)} 个PNG文件")
             
             # 创建输出文件夹
             output_folder = folder_path / "jpg_output"
             output_folder.mkdir(exist_ok=True)
-            self.log(f"输出文件夹: {output_folder}")
+            self.queue_log(f"输出文件夹: {output_folder}")
             
             # 设置进度条
-            self.root.after(0, lambda: self.progress.config(maximum=len(png_files), value=0))
+            self.queue_progress_max(len(png_files))
+            self.queue_progress(0)
             
             success_count = 0
             error_count = 0
@@ -390,34 +430,32 @@ class PNGtoJPGConverter:
                     self.convert_png_to_jpg(png_file, jpg_file)
                     
                     success_count += 1
-                    self.log(f"✓ [{i}/{len(png_files)}] {png_file.name} -> {jpg_file.name}")
+                    self.queue_log(f"✓ [{i}/{len(png_files)}] {png_file.name} -> {jpg_file.name}")
                     
                 except Exception as e:
                     error_count += 1
-                    self.log(f"✗ [{i}/{len(png_files)}] {png_file.name} - {str(e)}")
+                    self.queue_log(f"✗ [{i}/{len(png_files)}] {png_file.name} - {str(e)}")
                 
                 # 更新进度
-                self.root.after(0, lambda v=i: self.progress.config(value=v))
-                self.root.after(0, lambda v=i, t=len(png_files): self.progress_label.config(text=f"{v}/{t}"))
+                self.queue_progress(i)
+                self.queue_progress_label(f"{i}/{len(png_files)}")
             
             # 完成
-            self.log(f"\n{'='*60}")
-            self.log(f"转换完成!")
-            self.log(f"成功: {success_count} 个")
-            self.log(f"失败: {error_count} 个")
-            self.log(f"输出位置: {output_folder}")
-            self.log(f"{'='*60}\n")
+            self.queue_log(f"\n{'='*60}")
+            self.queue_log(f"转换完成!")
+            self.queue_log(f"成功: {success_count} 个")
+            self.queue_log(f"失败: {error_count} 个")
+            self.queue_log(f"输出位置: {output_folder}")
+            self.queue_log(f"{'='*60}\n")
             
             # 显示完成消息
-            self.root.after(0, lambda: messagebox.showinfo(
-                "完成", 
+            self.queue_messagebox_info(
                 f"转换完成!\n\n成功: {success_count} 个\n失败: {error_count} 个\n\n输出文件夹:\n{output_folder}"
-            ))
+            )
             
         except Exception as e:
-            self.log(f"处理过程中出错: {str(e)}")
-            self.log(traceback.format_exc())
-            self.root.after(0, lambda: messagebox.showerror("错误", f"处理过程中出错:\n{str(e)}"))
+            self.queue_log(f"处理过程中出错: {str(e)}")
+            self.queue_messagebox_error(f"处理过程中出错:\n{str(e)}")
     
     def convert_png_to_jpg(self, png_path, jpg_path):
         """将PNG转换为JPG"""
@@ -437,30 +475,19 @@ class PNGtoJPGConverter:
             img.save(jpg_path, 'JPEG', quality=95)
     
     def log(self, message):
-        """添加日志"""
+        """添加日志（主线程调用）"""
         try:
-            print(message)  # 同时输出到控制台
-            # 使用线程安全的方式更新UI
-            if threading.current_thread() != threading.main_thread():
-                self.root.after(0, lambda: self._insert_log(message))
-            else:
-                self._insert_log(message)
-        except Exception as e:
-            print(f"日志记录错误: {e}")
-    
-    def _insert_log(self, message):
-        """插入日志到文本框"""
-        try:
+            print(message)
             self.log_text.insert(tk.END, message + "\n")
             self.log_text.see(tk.END)
         except Exception as e:
-            print(f"插入日志错误: {e}")
+            print(f"日志记录错误: {e}")
     
     def clear_log(self):
         """清空日志"""
         try:
             self.log_text.delete(1.0, tk.END)
-            self.progress.config(value=0)
+            self.progress['value'] = 0
             self.progress_label.config(text="就绪")
             self.log("✓ 日志已清空")
         except Exception as e:
@@ -483,6 +510,7 @@ def main():
         print("程序正常退出")
     except Exception as e:
         print(f"程序运行错误: {e}")
+        import traceback
         traceback.print_exc()
         input("按回车键退出...")
 
