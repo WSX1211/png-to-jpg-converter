@@ -27,6 +27,7 @@ class PNGtoJPGConverter:
         
         # 初始化变量
         self.use_tkdnd = False
+        self.weekly_report_window = None
         
         try:
             self.setup_ui()
@@ -174,6 +175,14 @@ class PNGtoJPGConverter:
             command=self.clear_log
         )
         self.clear_btn.pack(side=tk.LEFT, padx=5)
+
+        # 独立的周报合并模块入口，不影响图片转换流程
+        self.weekly_report_btn = ttk.Button(
+            bottom_frame,
+            text="周报合并",
+            command=self.open_weekly_report
+        )
+        self.weekly_report_btn.pack(side=tk.LEFT, padx=5)
         
         # 退出按钮
         self.quit_btn = ttk.Button(
@@ -538,6 +547,21 @@ class PNGtoJPGConverter:
         except Exception as e:
             print(f"日志记录错误: {e}")
     
+    def open_weekly_report(self):
+        """打开独立的周报合并窗口。"""
+        try:
+            if self.weekly_report_window is not None:
+                window = self.weekly_report_window.window
+                if window.winfo_exists():
+                    window.deiconify()
+                    window.lift()
+                    window.focus_force()
+                    return
+            from weekly_report import WeeklyReportWindow
+            self.weekly_report_window = WeeklyReportWindow(self.root)
+        except Exception as e:
+            messagebox.showerror("错误", f"无法打开周报合并模块:\n{str(e)}")
+
     def clear_log(self):
         """清空日志"""
         try:

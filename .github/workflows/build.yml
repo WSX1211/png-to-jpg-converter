@@ -27,7 +27,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pyinstaller
+        pip install pyinstaller==6.21.0
         
     - name: Build EXE with PyInstaller
       run: |
@@ -42,26 +42,27 @@ jobs:
         
     - name: Create Release
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        tag_name: v1.0.1-${{ github.run_number }}
-        name: PNG转JPG转换器 Windows版 v1.0.1
+        tag_name: v1.1.0-${{ github.run_number }}
+        name: PNG转JPG及周报合并工具 Windows版 v1.1
         files: dist/PNG转JPG转换器.exe
         body: |
-          ## PNG 转 JPG 转换器
+          ## PNG 转 JPG 及周报合并工具
           
           ### 功能特点
           - ✅ 批量转换 PNG 到 JPG
-          - ✅ 支持拖拽文件夹
+          - ✅ 支持选择或拖拽多个图片和文件夹
           - ✅ 自动处理透明背景
-          - ✅ 实时显示转换进度
-          - ✅ 图形化界面
+          - ✅ 合并 XLSX、XLS、CSV 周报
+          - ✅ 动态配置基础字段和追加指标
+          - ✅ 重复“财务存”字段自动取最后一列
           
           ### 使用方法
           1. 下载 `PNG转JPG转换器.exe`
           2. 双击运行
-          3. 拖拽包含 PNG 图片的文件夹到窗口
-          4. 或点击「选择文件夹」按钮选择文件夹
-          5. 转换后的 JPG 图片保存在原文件夹的 `jpg_output` 子文件夹中
+          3. 图片转换可选择或拖拽 PNG 文件/文件夹
+          4. 点击「周报合并」打开独立合并窗口
+          5. 指定主文件和同期月、本周、上周、同期周文件后保存结果
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

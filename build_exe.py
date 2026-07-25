@@ -28,10 +28,12 @@ def build_exe():
         'png_to_jpg_converter.py',           # 主脚本
         '--name=PNG转JPG转换器',              # exe 名称
         '--onefile',                          # 打包成单个文件
-        # '--windowed',                       # 注释掉这行，显示控制台窗口用于调试
+        '--windowed',                         # GUI 程序不显示控制台窗口
         '--clean',                            # 清理临时文件
         '--noconfirm',                        # 不询问确认
-        # '--add-data=README.md;.',           # 注释掉，避免打包问题
+        '--hidden-import=weekly_report',      # 显式包含周报合并模块
+        '--collect-all=openpyxl',             # 包含 XLSX 读取/写入资源
+        '--collect-all=xlrd',                 # 包含 XLS 读取资源
     ]
     
     # Windows 特定设置
