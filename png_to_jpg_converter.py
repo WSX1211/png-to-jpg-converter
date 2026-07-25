@@ -221,8 +221,11 @@ class PNGtoJPGConverter:
             
             if file_paths:
                 self.log(f"选择了 {len(file_paths)} 个文件")
-                for file_path in file_paths:
-                    self.process_path(file_path)
+                
+                # 在新线程中批量处理
+                thread = threading.Thread(target=self._process_multiple_files_thread, args=(file_paths,))
+                thread.daemon = True
+                thread.start()
         except Exception as e:
             self.log(f"选择文件错误: {str(e)}")
             messagebox.showerror("错误", f"选择文件失败:\n{str(e)}")
@@ -279,11 +282,11 @@ class PNGtoJPGConverter:
             self.convert_png_to_jpg(png_path, jpg_path)
             
             self.log(f"✓ 转换成功: {jpg_path}")
-            messagebox.showinfo("成功", f"转换完成!\n\n输出文件:\n{jpg_path}")
+            return True, jpg_path
             
         except Exception as e:
             self.log(f"✗ 转换失败: {str(e)}")
-            messagebox.showerror("错误", f"转换失败:\n{str(e)}")
+            return False, str(e)
     
     def process_folder(self, folder_path):
         """处理文件夹"""
@@ -295,6 +298,65 @@ class PNGtoJPGConverter:
         except Exception as e:
             self.log(f"启动处理线程错误: {str(e)}")
             messagebox.showerror("错误", f"启动处理失败:\n{str(e)}")
+    
+    def _process_multiple_files_thread(self, file_paths):
+        """在后台线程中处理多个文件"""
+        try:
+            png_files = [Path(fp) for fp in file_paths if Path(fp).suffix.lower() == '.png']
+            
+            if not png_files:
+                self.root.after(0, lambda: messagebox.showinfo("提示", "没有找到有效的PNG文件"))
+                return
+            
+            self.log(f"\n{'='*60}")
+            self.log(f"开始处理 {len(png_files)} 个文件")
+            
+            # 确定输出文件夹（使用第一个文件的父目录）
+            output_folder = png_files[0].parent / "jpg_output"
+            output_folder.mkdir(exist_ok=True)
+            self.log(f"输出文件夹: {output_folder}")
+            
+            # 设置进度条
+            self.root.after(0, lambda: self.progress.config(maximum=len(png_files), value=0))
+            
+            success_count = 0
+            error_count = 0
+            
+            for i, png_file in enumerate(png_files, 1):
+                try:
+                    # 转换图片
+                    jpg_file = output_folder / (png_file.stem + ".jpg")
+                    self.convert_png_to_jpg(png_file, jpg_file)
+                    
+                    success_count += 1
+                    self.log(f"✓ [{i}/{len(png_files)}] {png_file.name} -> {jpg_file.name}")
+                    
+                except Exception as e:
+                    error_count += 1
+                    self.log(f"✗ [{i}/{len(png_files)}] {png_file.name} - {str(e)}")
+                
+                # 更新进度
+                self.root.after(0, lambda v=i: self.progress.config(value=v))
+                self.root.after(0, lambda v=i, t=len(png_files): self.progress_label.config(text=f"{v}/{t}"))
+            
+            # 完成
+            self.log(f"\n{'='*60}")
+            self.log(f"转换完成!")
+            self.log(f"成功: {success_count} 个")
+            self.log(f"失败: {error_count} 个")
+            self.log(f"输出位置: {output_folder}")
+            self.log(f"{'='*60}\n")
+            
+            # 显示完成消息
+            self.root.after(0, lambda: messagebox.showinfo(
+                "完成", 
+                f"转换完成!\n\n成功: {success_count} 个\n失败: {error_count} 个\n\n输出文件夹:\n{output_folder}"
+            ))
+            
+        except Exception as e:
+            self.log(f"处理过程中出错: {str(e)}")
+            self.log(traceback.format_exc())
+            self.root.after(0, lambda: messagebox.showerror("错误", f"处理过程中出错:\n{str(e)}"))
     
     def _process_folder_thread(self, folder_path):
         """在后台线程中处理文件夹"""
@@ -378,10 +440,21 @@ class PNGtoJPGConverter:
         """添加日志"""
         try:
             print(message)  # 同时输出到控制台
-            self.root.after(0, lambda: self.log_text.insert(tk.END, message + "\n"))
-            self.root.after(0, lambda: self.log_text.see(tk.END))
+            # 使用线程安全的方式更新UI
+            if threading.current_thread() != threading.main_thread():
+                self.root.after(0, lambda: self._insert_log(message))
+            else:
+                self._insert_log(message)
         except Exception as e:
             print(f"日志记录错误: {e}")
+    
+    def _insert_log(self, message):
+        """插入日志到文本框"""
+        try:
+            self.log_text.insert(tk.END, message + "\n")
+            self.log_text.see(tk.END)
+        except Exception as e:
+            print(f"插入日志错误: {e}")
     
     def clear_log(self):
         """清空日志"""
