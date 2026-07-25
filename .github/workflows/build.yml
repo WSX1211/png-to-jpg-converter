@@ -1,0 +1,64 @@
+name: Build EXE for Windows
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        
+    - name: Build EXE with PyInstaller
+      run: |
+        python build_exe.py
+        
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PNG转JPG转换器-Windows
+        path: dist/PNG转JPG转换器.exe
+        retention-days: 30
+        
+    - name: Create Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v1.0.0-${{ github.sha }}
+        name: PNG转JPG转换器 Windows版
+        files: dist/PNG转JPG转换器.exe
+        body: |
+          ## PNG 转 JPG 转换器
+          
+          ### 功能特点
+          - ✅ 批量转换 PNG 到 JPG
+          - ✅ 支持拖拽文件夹
+          - ✅ 自动处理透明背景
+          - ✅ 实时显示转换进度
+          - ✅ 图形化界面
+          
+          ### 使用方法
+          1. 下载 `PNG转JPG转换器.exe`
+          2. 双击运行
+          3. 拖拽包含 PNG 图片的文件夹到窗口
+          4. 或点击「选择文件夹」按钮选择文件夹
+          5. 转换后的 JPG 图片保存在原文件夹的 `jpg_output` 子文件夹中
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
