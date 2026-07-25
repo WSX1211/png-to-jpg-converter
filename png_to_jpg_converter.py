@@ -235,15 +235,44 @@ class PNGtoJPGConverter:
     def on_drop(self, event):
         """处理拖拽放下事件"""
         try:
-            # 获取拖拽的路径
+            # 获取拖拽的所有路径
             paths = self.root.tk.splitlist(event.data)
             
-            if paths:
-                path = paths[0].strip('{}')
-                self.process_path(path)
+            if not paths:
+                return
+            
+            # 清理路径并分类
+            files = []
+            folders = []
+            
+            for path in paths:
+                # 清理路径（去除大括号等）
+                clean_path = path.strip('{}').strip('"')
+                path_obj = Path(clean_path)
+                
+                if path_obj.exists():
+                    if path_obj.is_file():
+                        files.append(str(path_obj))
+                    elif path_obj.is_dir():
+                        folders.append(str(path_obj))
+            
+            # 处理文件
+            if files:
+                self.queue_log(f"拖拽了 {len(files)} 个文件")
+                thread = threading.Thread(target=self._process_files_thread, args=(files,))
+                thread.daemon = True
+                thread.start()
+            
+            # 处理文件夹
+            for folder in folders:
+                self.queue_log(f"拖拽了文件夹: {folder}")
+                thread = threading.Thread(target=self._process_folder_thread, args=(folder,))
+                thread.daemon = True
+                thread.start()
                 
             # 恢复界面
             self.on_drag_leave(None)
+            
         except Exception as e:
             self.queue_log(f"处理拖拽错误: {str(e)}")
             self.queue_messagebox_error(f"处理拖拽失败:\n{str(e)}")
