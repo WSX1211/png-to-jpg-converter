@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:  # 允许手动触发
 
+permissions:
+  contents: write  # 添加写入权限
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -41,8 +44,8 @@ jobs:
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v1.0.0-${{ github.sha }}
-        name: PNG转JPG转换器 Windows版
+        tag_name: v1.0.1-${{ github.run_number }}
+        name: PNG转JPG转换器 Windows版 v1.0.1
         files: dist/PNG转JPG转换器.exe
         body: |
           ## PNG 转 JPG 转换器
