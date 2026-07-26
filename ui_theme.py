@@ -169,6 +169,16 @@ def _configure_inputs(style: ttk.Style) -> None:
         darkcolor=[("focus", COLORS["blue"])],
     )
     style.configure(
+        "Compact.Modern.TEntry", fieldbackground=COLORS["surface"], foreground=COLORS["text"],
+        bordercolor=COLORS["border"], padding=(8, 4), insertcolor=COLORS["text"],
+    )
+    style.map(
+        "Compact.Modern.TEntry",
+        bordercolor=[("focus", COLORS["blue"])],
+        lightcolor=[("focus", COLORS["blue"])],
+        darkcolor=[("focus", COLORS["blue"])],
+    )
+    style.configure(
         "Business.Horizontal.TProgressbar", troughcolor="#E5DED5",
         background=COLORS["blue"], borderwidth=0, thickness=8,
     )

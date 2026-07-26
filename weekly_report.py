@@ -11,6 +11,7 @@ import threading
 from collections import defaultdict
 from copy import copy
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -361,34 +362,59 @@ def merge_reports(
     if any(output.resolve() == path.resolve() for path in input_paths):
         raise ValueError("输出文件不能覆盖任何输入文件")
 
-    logger("正在读取主文件……")
+    logger("=" * 72)
+    logger("周报合并任务配置")
+    logger(f"主文件路径：{Path(main_path).resolve()}")
+    for role, path in selected_sources:
+        logger(f"{role}路径：{path.resolve()}")
+    logger(f"输出路径：{output.resolve()}")
+    logger(f"基础字段（{len(base_fields)} 个）：{'、'.join(base_fields)}")
+    logger(f"追加指标（{len(metrics)} 个）：{'、'.join(metrics)}")
+    logger(f"已选追加角色（{len(selected_sources)} 个）：{'、'.join(role for role, _ in selected_sources)}")
+
+    def log_table_profile(
+        label: str,
+        table: TableData,
+        data_rows: list[tuple[int, list[object]]],
+    ) -> None:
+        header_columns = _last_nonempty_column(table.rows[table.header_index])
+        content_columns = max((_last_nonempty_column(row) for row in table.rows), default=0)
+        summary = (
+            f"已识别并去掉第 {table.summary_row_index + 1} 行汇总"
+            if table.summary_row_index is not None else "末行不是明确汇总，已保留"
+        )
+        logger(
+            f"{label} {table.path.name}：原始读取 {len(table.rows)} 行 × {content_columns} 个含值列；"
+            f"有效数据 {len(data_rows)} 行 × {header_columns} 列；表头第 {table.header_index + 1} 行；{summary}"
+        )
+        base_matches = []
+        for field in base_fields:
+            positions = table.header_map[normalize_header(field)]
+            base_matches.append(f"{field}=第{positions[0] + 1}列")
+        logger(f"{label}基础字段匹配：{'；'.join(base_matches)}")
+
+        metric_matches = []
+        for metric in metrics:
+            positions = table.header_map[normalize_header(metric)]
+            detail = f"{metric}=第{positions[-1] + 1}列"
+            if len(positions) > 1:
+                detail += f"（发现同名 {len(positions)} 列，取最后一列）"
+            metric_matches.append(detail)
+        logger(f"{label}指标匹配：{'；'.join(metric_matches)}")
+
+    logger("[读取] 正在读取主文件……")
     main = load_table(main_path, base_fields, metrics)
     main_data_rows = _effective_data_rows(main, base_fields, metrics)
     main_columns = _last_nonempty_column(main.rows[main.header_index])
-    main_summary = (
-        f"已去掉第 {main.summary_row_index + 1} 行汇总"
-        if main.summary_row_index is not None else "末行不是汇总，已保留"
-    )
-    logger(
-        f"主文件 {main.path.name}：有效数据 {len(main_data_rows)} 行 × {main_columns} 列；"
-        f"表头第 {main.header_index + 1} 行；{main_summary}"
-    )
+    log_table_profile("主文件", main, main_data_rows)
 
     sources: list[tuple[str, TableData]] = []
     source_data_rows: dict[str, list[tuple[int, list[object]]]] = {}
     for role, path in selected_sources:
-        logger(f"正在读取{role}：{path.name}")
+        logger(f"[读取] 正在读取{role}：{path.name}")
         table = load_table(path, base_fields, metrics)
         rows = _effective_data_rows(table, base_fields, metrics)
-        columns = _last_nonempty_column(table.rows[table.header_index])
-        summary = (
-            f"已去掉第 {table.summary_row_index + 1} 行汇总"
-            if table.summary_row_index is not None else "末行不是汇总，已保留"
-        )
-        logger(
-            f"{role} {table.path.name}：有效数据 {len(rows)} 行 × {columns} 列；"
-            f"表头第 {table.header_index + 1} 行；{summary}"
-        )
+        log_table_profile(role, table, rows)
         sources.append((role, table))
         source_data_rows[role] = rows
 
@@ -410,6 +436,17 @@ def merge_reports(
                 sheet.cell(header_row, next_column, f"{role}{metric.strip()}")
                 next_column += 1
 
+        added_columns = [
+            f"{role}{metric}=第{output_columns[(role, normalize_header(metric))]}列"
+            for role, _table in sources
+            for metric in metrics
+        ]
+        logger(
+            f"[建表] 主表原有 {original_width} 个有效列；新增 {len(added_columns)} 个角色指标列；"
+            f"输出共 {next_column - 1} 列"
+        )
+        logger(f"[建表] 新增列明细：{'；'.join(added_columns)}")
+
         main_base_columns = {
             normalize_header(field): _column_index(main, field, use_last=False) + 1
             for field in base_fields
@@ -420,6 +457,10 @@ def merge_reports(
         counts: dict[str, int] = {}
 
         for role, table in sources:
+            logger(
+                f"[追加] 开始处理{role}：准备追加 {len(source_data_rows[role])} 行，"
+                f"起始写入输出第 {append_row} 行"
+            )
             base_indexes = {normalize_header(field): _column_index(table, field, False) for field in base_fields}
             metric_indexes = {normalize_header(metric): _column_index(table, metric, True) for metric in metrics}
             count = 0
@@ -446,18 +487,21 @@ def merge_reports(
                 if progress:
                     progress(completed, max(total_rows, 1))
             counts[role] = count
-            logger(f"{role}：已追加 {count} 行")
+            logger(f"[追加] {role}完成：已追加 {count} 行，下一写入行为第 {append_row} 行")
 
         final_data_rows = len(main_data_rows) + sum(counts.values())
         final_columns = next_column - 1
         final_sheet_rows = append_row - 1
         output.parent.mkdir(parents=True, exist_ok=True)
+        logger(f"[保存] 正在写入输出文件：{output.resolve()}")
         workbook.save(output)
         logger(
-            f"最终结果：有效数据 {final_data_rows} 行 × {final_columns} 列；"
+            f"[完成] 最终结果：有效数据 {final_data_rows} 行 × {final_columns} 列；"
             f"工作表共 {final_sheet_rows} 行（含表头及表头前说明行）"
         )
-        logger(f"合并完成：{output}")
+        logger(f"[完成] 各角色追加行数：{'；'.join(f'{role}={count}行' for role, count in counts.items())}")
+        logger(f"[完成] 输出文件：{output.resolve()}")
+        logger("=" * 72)
         return MergeResult(output, counts)
     finally:
         workbook.close()
@@ -470,19 +514,19 @@ class WeeklyReportWindow:
         self.window = tk.Toplevel(parent)
         configure_theme(self.window)
         self.window.title("Image Weekly Studio · 周报合并")
-        self.window.geometry("980x820")
-        self.window.minsize(840, 700)
+        self.window.geometry("1040x900")
+        self.window.minsize(900, 760)
         self.messages: queue.Queue[dict[str, object]] = queue.Queue()
         self.file_vars = {"周报本月": tk.StringVar(), **{role: tk.StringVar() for role in SOURCE_ROLES}}
         self._build_ui()
         self._poll_messages()
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.window, padding=20, style="App.TFrame")
+        container = ttk.Frame(self.window, padding=(20, 14), style="App.TFrame")
         container.pack(fill=tk.BOTH, expand=True)
 
-        header = ttk.Frame(container, padding=(24, 18), style="Header.TFrame")
-        header.pack(fill=tk.X, pady=(0, 14))
+        header = ttk.Frame(container, padding=(24, 14), style="Header.TFrame")
+        header.pack(fill=tk.X, pady=(0, 10))
         header_copy = ttk.Frame(header, style="Header.TFrame")
         header_copy.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Label(header_copy, text="周报合并", style="HeaderTitle.TLabel").pack(anchor=tk.W)
@@ -502,46 +546,48 @@ class WeeklyReportWindow:
         files_frame = ttk.LabelFrame(
             container,
             text="01  选择文件",
-            padding=(16, 12),
+            padding=(14, 8),
             style="Card.TLabelframe",
         )
-        files_frame.pack(fill=tk.X, pady=(0, 12))
+        files_frame.pack(fill=tk.X, pady=(0, 10))
         ttk.Label(
             files_frame,
             text="周报本月为主文件（必选）；同期月、本周、上周、同期周可按需选择。",
             style="CardText.TLabel",
-        ).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=(0, 7))
+        ).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=(0, 4))
         for row, role in enumerate(("周报本月",) + SOURCE_ROLES, start=1):
             label = "主文件 · 周报本月" if role == "周报本月" else role
             ttk.Label(files_frame, text=label, width=18, style="CardText.TLabel").grid(
-                row=row, column=0, sticky=tk.W, pady=3
+                row=row, column=0, sticky=tk.W, pady=2
             )
             ttk.Entry(
                 files_frame,
                 textvariable=self.file_vars[role],
-                style="Modern.TEntry",
-            ).grid(row=row, column=1, sticky=tk.EW, padx=(6, 8), pady=3)
+                style="Compact.Modern.TEntry",
+            ).grid(row=row, column=1, sticky=tk.EW, padx=(6, 8), pady=2)
             ttk.Button(
                 files_frame,
                 text="选择文件",
                 command=lambda r=role: self._choose_file(r),
                 style="Secondary.TButton",
-            ).grid(row=row, column=2, pady=3)
+                padding=(10, 4),
+            ).grid(row=row, column=2, pady=2)
             ttk.Button(
                 files_frame,
                 text="清除",
                 command=lambda r=role: self.file_vars[r].set(""),
                 style="Ghost.TButton",
-            ).grid(row=row, column=3, padx=(4, 0), pady=3)
+                padding=(7, 4),
+            ).grid(row=row, column=3, padx=(4, 0), pady=2)
         files_frame.columnconfigure(1, weight=1)
 
         config_frame = ttk.LabelFrame(
             container,
             text="02  配置字段",
-            padding=(16, 12),
+            padding=(14, 8),
             style="Card.TLabelframe",
         )
-        config_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        config_frame.pack(fill=tk.X, expand=False, pady=(0, 10))
         config_frame.columnconfigure(0, weight=1, uniform="fields")
         config_frame.columnconfigure(1, weight=1, uniform="fields")
         config_frame.rowconfigure(1, weight=1)
@@ -550,13 +596,13 @@ class WeeklyReportWindow:
             config_frame,
             text="每行一个字段，也支持逗号分隔；重复同名指标自动读取最后一列。",
             style="CardText.TLabel",
-        ).grid(row=0, column=0, sticky=tk.W, pady=(0, 7))
+        ).grid(row=0, column=0, sticky=tk.W, pady=(0, 4))
         ttk.Button(
             config_frame,
             text="恢复默认字段",
             command=self._restore_defaults,
             style="Ghost.TButton",
-        ).grid(row=0, column=1, sticky=tk.E, pady=(0, 7))
+        ).grid(row=0, column=1, sticky=tk.E, pady=(0, 4))
 
         base_panel = ttk.Frame(config_frame, style="Card.TFrame")
         base_panel.grid(row=1, column=0, sticky=tk.NSEW, padx=(0, 6))
@@ -565,7 +611,7 @@ class WeeklyReportWindow:
         ttk.Label(base_panel, text="基础字段 · 默认 14 个", style="CardTitle.TLabel").grid(
             row=0, column=0, sticky=tk.W, pady=(0, 5)
         )
-        self.base_text = tk.Text(base_panel, height=10, wrap=tk.NONE)
+        self.base_text = tk.Text(base_panel, height=4, wrap=tk.NONE)
         style_text_widget(self.base_text)
         self.base_text.grid(row=1, column=0, sticky=tk.NSEW)
         base_scrollbar = ttk.Scrollbar(
@@ -584,7 +630,7 @@ class WeeklyReportWindow:
         ttk.Label(metric_panel, text="追加指标 · 默认 5 个", style="CardTitle.TLabel").grid(
             row=0, column=0, sticky=tk.W, pady=(0, 5)
         )
-        self.metric_text = tk.Text(metric_panel, height=10, wrap=tk.NONE)
+        self.metric_text = tk.Text(metric_panel, height=4, wrap=tk.NONE)
         style_text_widget(self.metric_text)
         self.metric_text.grid(row=1, column=0, sticky=tk.NSEW)
         metric_scrollbar = ttk.Scrollbar(
@@ -598,7 +644,7 @@ class WeeklyReportWindow:
         self._restore_defaults()
 
         status_frame = ttk.Frame(container, padding=(16, 11), style="Card.TFrame")
-        status_frame.pack(fill=tk.X, pady=(0, 12))
+        status_frame.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(status_frame, text="合并进度", style="CardTitle.TLabel").pack(
             side=tk.LEFT, padx=(0, 12)
         )
@@ -618,11 +664,35 @@ class WeeklyReportWindow:
             style="Card.TLabelframe",
         )
         log_frame.pack(fill=tk.BOTH, expand=True)
-        self.log_text = tk.Text(log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED)
+        log_toolbar = ttk.Frame(log_frame, style="Card.TFrame")
+        log_toolbar.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(
+            log_toolbar,
+            text="完整记录文件、字段匹配、汇总行、追加进度和最终行列数",
+            style="CardText.TLabel",
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            log_toolbar,
+            text="复制日志",
+            command=self._copy_log,
+            style="Secondary.TButton",
+            padding=(10, 4),
+        ).pack(side=tk.RIGHT)
+        ttk.Button(
+            log_toolbar,
+            text="清空",
+            command=self._clear_log,
+            style="Ghost.TButton",
+            padding=(7, 4),
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+
+        log_body = ttk.Frame(log_frame, style="Card.TFrame")
+        log_body.pack(fill=tk.BOTH, expand=True)
+        self.log_text = tk.Text(log_body, height=14, wrap=tk.WORD, state=tk.DISABLED)
         style_text_widget(self.log_text)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = ttk.Scrollbar(
-            log_frame,
+            log_body,
             orient=tk.VERTICAL,
             command=self.log_text.yview,
             style="Modern.Vertical.TScrollbar",
@@ -742,10 +812,27 @@ class WeeklyReportWindow:
         self.window.after(100, self._poll_messages)
 
     def _append_log(self, text: str) -> None:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        lines = text.splitlines() or [""]
         self.log_text.configure(state=tk.NORMAL)
-        self.log_text.insert(tk.END, text + "\n")
+        for line in lines:
+            self.log_text.insert(tk.END, f"[{timestamp}] {line}\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state=tk.DISABLED)
+
+    def _clear_log(self) -> None:
+        self.log_text.configure(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.configure(state=tk.DISABLED)
+
+    def _copy_log(self) -> None:
+        content = self.log_text.get("1.0", tk.END).strip()
+        if not content:
+            return
+        self.window.clipboard_clear()
+        self.window.clipboard_append(content)
+        self.window.update_idletasks()
+        self._append_log("日志已复制到剪贴板")
 
     def _handle_done(self, result: object) -> None:
         assert isinstance(result, MergeResult)
