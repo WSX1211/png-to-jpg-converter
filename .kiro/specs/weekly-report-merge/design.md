@@ -16,7 +16,7 @@
 `detect_header(rows, fields, file_name)` 在前100行匹配动态字段。表头映射保留同名字段的全部物理列位置。
 
 ### Merge Service
-`merge_reports(main_path, source_paths, base_fields, metrics, output_path, log, progress)` 保留主表、扩展角色指标列并纵向追加数据。
+`merge_reports(main_path, source_paths, base_fields, metrics, output_path, log, progress)` 保留主表（末尾汇总行除外）、扩展角色指标列并纵向追加数据。CSV 使用保守类型推断，前导零代码保持文本；XLSX/XLS 记录并复用数字格式。新增列从有效表头最后一列之后开始。每个表仅在最后有效行具有明确汇总标签时排除该行，并记录输入和最终逻辑尺寸。
 
 ### Weekly Report Window
 独立维护文件路径、字段文本、消息队列、进度和日志。后台线程只写队列，Tk 主线程更新界面。
@@ -27,9 +27,9 @@
 - `source_paths`：角色名到输入路径的映射。
 
 ## Correctness Properties
-### Property 1: 主表保持不变
-**Validates: Requirements 3.1**
-主表原有单元格在输出中保持原位置和值。
+### Property 1: 主表内容保持
+**Validates: Requirements 3.1, 3.10**
+除严格识别出的末尾汇总行外，主表原有单元格保持原位置和值。
 
 ### Property 2: 重复指标选择
 **Validates: Requirements 2.5**

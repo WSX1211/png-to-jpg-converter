@@ -54,8 +54,8 @@ jobs:
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v1.1.2-${{ github.run_number }}
-        name: ImageWeeklyTool Windows v1.1.2
+        tag_name: v1.2.0-${{ github.run_number }}
+        name: ImageWeeklyTool Windows v1.2.0
         files: |
           dist/ImageWeeklyTool-Windows.zip
           dist/SHA256SUMS.txt
@@ -71,6 +71,10 @@ jobs:
           - ✅ 动态配置基础字段和追加指标
           - ✅ 重复“财务存”自动选择最后一列
           - ✅ 周报合并按钮显示在主操作区
+          - ✅ 数值类型与 Excel 数字格式保持
+          - ✅ 自动忽略尾部空白格式列
+          - ✅ 自动移除末尾合计/总计/汇总行
+          - ✅ 日志显示每个文件及最终结果行列数
           
           ### Windows 首次运行
           本程序未使用商业代码签名证书。如果 SmartScreen 提示未知发布者，请先核对 SHA-256，

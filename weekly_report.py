@@ -33,6 +33,8 @@ class TableData:
     rows: list[list[object]]
     header_index: int
     header_map: dict[str, list[int]]
+    number_formats: list[list[str]] | None = None
+    summary_row_index: int | None = None
 
 
 @dataclass
@@ -62,36 +64,67 @@ def parse_field_text(text: str) -> list[str]:
     return fields
 
 
-def _read_xlsx(path: Path) -> list[list[object]]:
+def _read_xlsx(path: Path) -> tuple[list[list[object]], list[list[str]]]:
     from openpyxl import load_workbook
 
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         sheet = workbook.active
-        return [list(row) for row in sheet.iter_rows(values_only=True)]
+        rows: list[list[object]] = []
+        formats: list[list[str]] = []
+        for cells in sheet.iter_rows():
+            rows.append([cell.value for cell in cells])
+            formats.append([cell.number_format or "General" for cell in cells])
+        return rows, formats
     finally:
         workbook.close()
 
 
-def _read_xls(path: Path) -> list[list[object]]:
+def _read_xls(path: Path) -> tuple[list[list[object]], list[list[str]]]:
     import xlrd
 
-    workbook = xlrd.open_workbook(path)
+    workbook = xlrd.open_workbook(path, formatting_info=True)
     sheet = workbook.sheet_by_index(0)
     rows: list[list[object]] = []
+    formats: list[list[str]] = []
     for row_index in range(sheet.nrows):
         row: list[object] = []
+        row_formats: list[str] = []
         for column_index in range(sheet.ncols):
             cell = sheet.cell(row_index, column_index)
             if cell.ctype == xlrd.XL_CELL_DATE:
                 row.append(xlrd.xldate.xldate_as_datetime(cell.value, workbook.datemode))
             else:
                 row.append(cell.value)
+            try:
+                format_key = workbook.xf_list[cell.xf_index].format_key
+                row_formats.append(workbook.format_map[format_key].format_str or "General")
+            except (AttributeError, IndexError, KeyError):
+                row_formats.append("General")
         rows.append(row)
-    return rows
+        formats.append(row_formats)
+    return rows, formats
 
 
-def _read_csv(path: Path) -> list[list[object]]:
+def _coerce_csv_cell(value: str) -> object:
+    """保守恢复 CSV 数值；前导零代码和超长整数保持文本。"""
+    text = value.strip()
+    if not text:
+        return None
+    compact = text.replace(",", "") if re.fullmatch(r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?", text) else text
+    if re.fullmatch(r"[+-]?0\d+", compact):
+        return text
+    if re.fullmatch(r"[+-]?\d+", compact):
+        digits = compact.lstrip("+-")
+        return int(compact) if len(digits) <= 15 else text
+    if re.fullmatch(r"[+-]?(?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?", compact):
+        return float(compact)
+    if re.fullmatch(r"[+-]?\d+[eE][+-]?\d+", compact):
+        return float(compact)
+    return value
+
+
+def _read_csv(path: Path) -> tuple[list[list[object]], None]:
     last_error: Exception | None = None
     for encoding in ("utf-8-sig", "utf-8", "gb18030"):
         try:
@@ -102,13 +135,14 @@ def _read_csv(path: Path) -> list[list[object]]:
                     dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
                 except csv.Error:
                     dialect = csv.excel
-                return [list(row) for row in csv.reader(file, dialect)]
+                rows = [list(row) for row in csv.reader(file, dialect)]
+                return rows, None
         except UnicodeDecodeError as error:
             last_error = error
     raise ValueError(f"无法识别 CSV 编码：{path.name}") from last_error
 
 
-def read_rows(path: str | Path) -> list[list[object]]:
+def read_table_content(path: str | Path) -> tuple[list[list[object]], list[list[str]] | None]:
     file_path = Path(path)
     if not file_path.exists():
         raise ValueError(f"文件不存在：{file_path}")
@@ -116,14 +150,19 @@ def read_rows(path: str | Path) -> list[list[object]]:
     if suffix not in SUPPORTED_SUFFIXES:
         raise ValueError(f"不支持的文件格式：{file_path.name}")
     if suffix == ".xlsx":
-        rows = _read_xlsx(file_path)
+        rows, formats = _read_xlsx(file_path)
     elif suffix == ".xls":
-        rows = _read_xls(file_path)
+        rows, formats = _read_xls(file_path)
     else:
-        rows = _read_csv(file_path)
+        rows, formats = _read_csv(file_path)
     if not rows:
         raise ValueError(f"文件没有数据：{file_path.name}")
-    return rows
+    return rows, formats
+
+
+def read_rows(path: str | Path) -> list[list[object]]:
+    """兼容原调用，仅返回单元格值。"""
+    return read_table_content(path)[0]
 
 
 def build_header_map(row: Iterable[object]) -> dict[str, list[int]]:
@@ -152,11 +191,30 @@ def detect_header(rows: list[list[object]], fields: list[str], file_name: str) -
     raise ValueError(f"{file_name} 无法识别完整表头（{matched}），缺少：{'、'.join(missing)}")
 
 
+def _coerce_csv_numeric_columns(
+    rows: list[list[object]], header_index: int, header_map: dict[str, list[int]], metrics: list[str]
+) -> None:
+    numeric_fields = set(DEFAULT_METRICS) | {"牌价", "行位"} | set(metrics)
+    numeric_indexes = {
+        index
+        for field in numeric_fields
+        for index in header_map.get(normalize_header(field), [])
+    }
+    for row in rows[header_index + 1:]:
+        for index in numeric_indexes:
+            if index < len(row) and isinstance(row[index], str):
+                row[index] = _coerce_csv_cell(row[index])
+
+
 def load_table(path: str | Path, base_fields: list[str], metrics: list[str]) -> TableData:
     file_path = Path(path)
-    rows = read_rows(file_path)
+    rows, number_formats = read_table_content(file_path)
     header_index, header_map = detect_header(rows, base_fields + metrics, file_path.name)
-    return TableData(file_path, rows, header_index, header_map)
+    if file_path.suffix.lower() == ".csv":
+        _coerce_csv_numeric_columns(rows, header_index, header_map, metrics)
+    table = TableData(file_path, rows, header_index, header_map, number_formats)
+    table.summary_row_index = _find_final_summary_row(table, base_fields, metrics)
+    return table
 
 
 def _column_index(table: TableData, field: str, use_last: bool) -> int:
@@ -164,19 +222,85 @@ def _column_index(table: TableData, field: str, use_last: bool) -> int:
     return indexes[-1] if use_last else indexes[0]
 
 
+def _is_nonempty(value: object) -> bool:
+    return value is not None and (not isinstance(value, str) or bool(value.strip()))
+
+
 def _has_values(row: list[object], indexes: Iterable[int]) -> bool:
-    return any(index < len(row) and row[index] not in (None, "") for index in indexes)
+    return any(index < len(row) and _is_nonempty(row[index]) for index in indexes)
 
 
 def _cell_value(row: list[object], index: int) -> object:
     return row[index] if index < len(row) else None
 
 
-def _last_content_row(rows: list[list[object]]) -> int:
+def _cell_number_format(table: TableData, row_index: int, column_index: int) -> str | None:
+    if table.number_formats is None or row_index >= len(table.number_formats):
+        return None
+    row_formats = table.number_formats[row_index]
+    return row_formats[column_index] if column_index < len(row_formats) else None
+
+
+def _write_value(sheet, row: int, column: int, value: object, number_format: str | None) -> None:
+    cell = sheet.cell(row, column, value)
+    if number_format and number_format.lower() != "general":
+        cell.number_format = number_format
+
+
+def _last_nonempty_column(row: list[object]) -> int:
+    for index in range(len(row) - 1, -1, -1):
+        if _is_nonempty(row[index]):
+            return index + 1
+    return 0
+
+
+def _last_content_row(rows: list[list[object]], excluded_index: int | None = None) -> int:
     for index in range(len(rows) - 1, -1, -1):
-        if any(value not in (None, "") for value in rows[index]):
+        if index != excluded_index and any(_is_nonempty(value) for value in rows[index]):
             return index + 1
     return 1
+
+
+def _find_final_summary_row(table: TableData, base_fields: list[str], metrics: list[str]) -> int | None:
+    base_indexes = [_column_index(table, field, False) for field in base_fields]
+    metric_indexes = [_column_index(table, metric, True) for metric in metrics]
+    relevant_indexes = base_indexes + metric_indexes
+    final_index: int | None = None
+    for index in range(len(table.rows) - 1, table.header_index, -1):
+        if _has_values(table.rows[index], relevant_indexes):
+            final_index = index
+            break
+    if final_index is None:
+        return None
+
+    row = table.rows[final_index]
+    labels = []
+    for column_index in base_indexes:
+        value = _cell_value(row, column_index)
+        if isinstance(value, str):
+            labels.append(re.sub(r"[\s:：]+", "", value).lower())
+    summary_words = ("合计", "总计", "汇总", "小计")
+    has_summary_label = any(
+        label in {"total", "grandtotal"}
+        or (len(label) <= 12 and any(label.endswith(word) for word in summary_words))
+        for label in labels
+    )
+    has_metric_value = _has_values(row, metric_indexes)
+    return final_index if has_summary_label and has_metric_value else None
+
+
+def _effective_data_rows(
+    table: TableData, base_fields: list[str], metrics: list[str]
+) -> list[tuple[int, list[object]]]:
+    indexes = (
+        [_column_index(table, field, False) for field in base_fields]
+        + [_column_index(table, metric, True) for metric in metrics]
+    )
+    return [
+        (index, row)
+        for index, row in enumerate(table.rows[table.header_index + 1:], start=table.header_index + 1)
+        if index != table.summary_row_index and _has_values(row, indexes)
+    ]
 
 
 def _copy_header_style(sheet, source_column: int, target_column: int, header_row: int) -> None:
@@ -220,7 +344,7 @@ def merge_reports(
     log: Callable[[str], None] | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> MergeResult:
-    """保留主表，并将各来源行写入带角色前缀的动态指标列。"""
+    """保留主表主体，排除末尾汇总，并按角色纵向追加来源数据。"""
     logger = log or (lambda _message: None)
     if not base_fields:
         raise ValueError("基础字段不能为空")
@@ -237,56 +361,83 @@ def merge_reports(
 
     logger("正在读取主文件……")
     main = load_table(main_path, base_fields, metrics)
+    main_data_rows = _effective_data_rows(main, base_fields, metrics)
+    main_columns = _last_nonempty_column(main.rows[main.header_index])
+    main_summary = (
+        f"已去掉第 {main.summary_row_index + 1} 行汇总"
+        if main.summary_row_index is not None else "末行不是汇总，已保留"
+    )
+    logger(
+        f"主文件 {main.path.name}：有效数据 {len(main_data_rows)} 行 × {main_columns} 列；"
+        f"表头第 {main.header_index + 1} 行；{main_summary}"
+    )
+
     sources: list[tuple[str, TableData]] = []
+    source_data_rows: dict[str, list[tuple[int, list[object]]]] = {}
     for role, path in selected_sources:
         logger(f"正在读取{role}：{path.name}")
-        sources.append((role, load_table(path, base_fields, metrics)))
+        table = load_table(path, base_fields, metrics)
+        rows = _effective_data_rows(table, base_fields, metrics)
+        columns = _last_nonempty_column(table.rows[table.header_index])
+        summary = (
+            f"已去掉第 {table.summary_row_index + 1} 行汇总"
+            if table.summary_row_index is not None else "末行不是汇总，已保留"
+        )
+        logger(
+            f"{role} {table.path.name}：有效数据 {len(rows)} 行 × {columns} 列；"
+            f"表头第 {table.header_index + 1} 行；{summary}"
+        )
+        sources.append((role, table))
+        source_data_rows[role] = rows
 
     workbook, sheet = _create_output_workbook(main)
     try:
-        original_width = max(max((len(row) for row in main.rows), default=0), sheet.max_column)
+        if main.summary_row_index is not None:
+            sheet.delete_rows(main.summary_row_index + 1, 1)
+
+        original_width = main_columns
+        if original_width < 1:
+            raise ValueError("主文件表头没有有效列")
         header_row = main.header_index + 1
-        source_style_column = max(1, original_width)
         output_columns: dict[tuple[str, str], int] = {}
         next_column = original_width + 1
         for role, _table in sources:
             for metric in metrics:
                 output_columns[(role, normalize_header(metric))] = next_column
-                cell = sheet.cell(header_row, next_column, f"{role}{metric.strip()}")
-                _copy_header_style(sheet, source_style_column, next_column, header_row)
-                cell.value = f"{role}{metric.strip()}"
+                _copy_header_style(sheet, original_width, next_column, header_row)
+                sheet.cell(header_row, next_column, f"{role}{metric.strip()}")
                 next_column += 1
 
         main_base_columns = {
             normalize_header(field): _column_index(main, field, use_last=False) + 1
             for field in base_fields
         }
-        append_row = _last_content_row(main.rows) + 1
-        total_rows = sum(
-            1
-            for _role, table in sources
-            for row in table.rows[table.header_index + 1:]
-            if _has_values(
-                row,
-                [_column_index(table, field, False) for field in base_fields]
-                + [_column_index(table, metric, True) for metric in metrics],
-            )
-        )
+        append_row = _last_content_row(main.rows, main.summary_row_index) + 1
+        total_rows = sum(len(source_data_rows[role]) for role, _table in sources)
         completed = 0
         counts: dict[str, int] = {}
+
         for role, table in sources:
             base_indexes = {normalize_header(field): _column_index(table, field, False) for field in base_fields}
             metric_indexes = {normalize_header(metric): _column_index(table, metric, True) for metric in metrics}
-            source_indexes = list(base_indexes.values()) + list(metric_indexes.values())
             count = 0
-            for row in table.rows[table.header_index + 1:]:
-                if not _has_values(row, source_indexes):
-                    continue
+            for source_row_index, row in source_data_rows[role]:
                 for field_name, source_index in base_indexes.items():
-                    sheet.cell(append_row, main_base_columns[field_name], _cell_value(row, source_index))
+                    _write_value(
+                        sheet,
+                        append_row,
+                        main_base_columns[field_name],
+                        _cell_value(row, source_index),
+                        _cell_number_format(table, source_row_index, source_index),
+                    )
                 for metric_name, source_index in metric_indexes.items():
-                    target_column = output_columns[(role, metric_name)]
-                    sheet.cell(append_row, target_column, _cell_value(row, source_index))
+                    _write_value(
+                        sheet,
+                        append_row,
+                        output_columns[(role, metric_name)],
+                        _cell_value(row, source_index),
+                        _cell_number_format(table, source_row_index, source_index),
+                    )
                 append_row += 1
                 count += 1
                 completed += 1
@@ -295,8 +446,15 @@ def merge_reports(
             counts[role] = count
             logger(f"{role}：已追加 {count} 行")
 
+        final_data_rows = len(main_data_rows) + sum(counts.values())
+        final_columns = next_column - 1
+        final_sheet_rows = append_row - 1
         output.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output)
+        logger(
+            f"最终结果：有效数据 {final_data_rows} 行 × {final_columns} 列；"
+            f"工作表共 {final_sheet_rows} 行（含表头及表头前说明行）"
+        )
         logger(f"合并完成：{output}")
         return MergeResult(output, counts)
     finally:
