@@ -378,7 +378,7 @@ class WeeklyReportWindow:
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
         actions = ttk.Frame(container)
-        actions.pack(fill=tk.X, pady=(10, 0))
+        actions.pack(fill=tk.X, before=files_frame, pady=(0, 10))
         self.merge_button = ttk.Button(actions, text="开始合并", command=self._start_merge)
         self.merge_button.pack(side=tk.RIGHT)
         ttk.Button(actions, text="关闭", command=self.window.destroy).pack(side=tk.RIGHT, padx=8)
