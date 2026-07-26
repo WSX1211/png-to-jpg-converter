@@ -171,31 +171,17 @@ class PNGtoJPGConverter:
         self.quit_btn.pack(side=tk.RIGHT)
         
     def setup_drag_drop(self):
-        """设置拖拽功能"""
+        """在当前根窗口上启用拖拽，不销毁或重建 Tk 实例。"""
         try:
-            from tkinterdnd2 import DND_FILES, TkinterDnD
-            
-            # 重新创建支持拖拽的窗口
-            self.root.destroy()
-            self.root = TkinterDnD.Tk()
-            self.root.title("PNG 转 JPG 转换器")
-            self.root.geometry("700x550")
-            
-            # 重新设置界面
-            self.setup_ui()
-            
-            # 绑定拖拽事件
+            from tkinterdnd2 import DND_FILES
+
             self.drop_frame.drop_target_register(DND_FILES)
             self.drop_frame.dnd_bind('<<Drop>>', self.on_drop)
             self.drop_frame.dnd_bind('<<DragEnter>>', self.on_drag_enter)
             self.drop_frame.dnd_bind('<<DragLeave>>', self.on_drag_leave)
-            
+
             self.use_tkdnd = True
             self.log("✓ 已启用拖拽功能")
-            
-            # 重新启动队列检查
-            self.check_queue()
-            
         except ImportError:
             self.use_tkdnd = False
             self.log("⚠ 未安装 tkinterdnd2，拖拽功能不可用")
@@ -559,7 +545,12 @@ def main():
         print("=" * 60)
         
         enable_windows_dpi_awareness()
-        root = tk.Tk()
+        try:
+            from tkinterdnd2 import TkinterDnD
+
+            root = TkinterDnD.Tk()
+        except ImportError:
+            root = tk.Tk()
         app = PNGtoJPGConverter(root)
         
         print("程序初始化完成，进入主循环...")
