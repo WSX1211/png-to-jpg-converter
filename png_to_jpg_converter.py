@@ -14,6 +14,8 @@ from tkinter import ttk, messagebox, filedialog
 import threading
 import queue
 
+from ui_theme import configure_theme, enable_windows_dpi_awareness, style_text_widget
+
 
 class PNGtoJPGConverter:
     def __init__(self, root):
@@ -74,132 +76,99 @@ class PNGtoJPGConverter:
             self.root.after(100, self.check_queue)
         
     def setup_ui(self):
-        """设置界面"""
-        # 主框架
-        main_frame = ttk.Frame(self.root, padding="20")
+        """设置现代商务风格界面。"""
+        configure_theme(self.root)
+        self.root.title("Image Weekly Studio · 图片与周报工具")
+        self.root.geometry("820x700")
+        self.root.minsize(720, 620)
+
+        main_frame = ttk.Frame(self.root, padding=22, style="App.TFrame")
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # 标题
-        title_label = ttk.Label(
-            main_frame, 
-            text="PNG 转 JPG 转换器", 
-            font=("Arial", 18, "bold")
-        )
-        title_label.pack(pady=(0, 10))
-        
-        # 说明文字
-        info_label = ttk.Label(
-            main_frame,
-            text="支持转换单个PNG文件或整个文件夹\n拖拽文件/文件夹到下方区域或点击按钮选择",
-            font=("Arial", 10),
-            justify=tk.CENTER
-        )
-        info_label.pack(pady=(0, 15))
-        
-        # 拖拽区域框架
+
+        header = ttk.Frame(main_frame, padding=(24, 18), style="Header.TFrame")
+        header.pack(fill=tk.X, pady=(0, 16))
+        ttk.Label(header, text="Image Weekly Studio", style="HeaderTitle.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            header,
+            text="图片格式转换与周报数据合并 · 简洁、可靠、高效",
+            style="HeaderSubtitle.TLabel",
+        ).pack(anchor=tk.W, pady=(4, 0))
+
         self.drop_frame = ttk.LabelFrame(
-            main_frame, 
-            text="拖拽文件或文件夹到此处", 
-            padding="30"
+            main_frame,
+            text="图片转换",
+            padding=(28, 22),
+            style="Drop.TLabelframe",
         )
-        self.drop_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
-        
-        # 拖拽提示标签
+        self.drop_frame.pack(fill=tk.X, pady=(0, 14))
+
         self.drop_label = ttk.Label(
             self.drop_frame,
-            text="📁\n拖拽PNG文件或文件夹到这里\n或",
-            font=("Arial", 12),
-            justify=tk.CENTER
+            text="拖拽 PNG 文件或文件夹到这里",
+            style="DropTitle.TLabel",
+            justify=tk.CENTER,
         )
-        self.drop_label.pack(expand=True)
-        
-        # 按钮框架
-        button_frame = ttk.Frame(self.drop_frame)
-        button_frame.pack(pady=10)
-        
-        # 选择文件按钮
+        self.drop_label.pack(pady=(4, 4))
+        ttk.Label(
+            self.drop_frame,
+            text="支持单张、多张和整个文件夹；透明背景自动转换为白色",
+            style="CardText.TLabel",
+            justify=tk.CENTER,
+        ).pack(pady=(0, 14))
+
+        button_frame = ttk.Frame(self.drop_frame, style="Card.TFrame")
+        button_frame.pack()
         self.select_file_btn = ttk.Button(
-            button_frame,
-            text="选择文件",
-            command=self.select_file,
-            width=15
+            button_frame, text="选择 PNG 文件", command=self.select_file,
+            width=16, style="Primary.TButton",
         )
         self.select_file_btn.pack(side=tk.LEFT, padx=5)
-        
-        # 选择文件夹按钮
         self.select_folder_btn = ttk.Button(
-            button_frame,
-            text="选择文件夹",
-            command=self.select_folder,
-            width=15
+            button_frame, text="选择文件夹", command=self.select_folder,
+            width=15, style="Secondary.TButton",
         )
         self.select_folder_btn.pack(side=tk.LEFT, padx=5)
-
-        # 在主要操作区提供显眼的周报入口，避免底部按钮受显示缩放影响
         self.weekly_report_top_btn = ttk.Button(
-            button_frame,
-            text="周报合并",
-            command=self.open_weekly_report,
-            width=15
+            button_frame, text="周报合并", command=self.open_weekly_report,
+            width=15, style="Dark.TButton",
         )
         self.weekly_report_top_btn.pack(side=tk.LEFT, padx=5)
-        
-        # 进度条框架
-        progress_frame = ttk.Frame(main_frame)
-        progress_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # 进度条
+
+        status_frame = ttk.Frame(main_frame, padding=(16, 12), style="Card.TFrame")
+        status_frame.pack(fill=tk.X, pady=(0, 14))
+        ttk.Label(status_frame, text="处理进度", style="CardTitle.TLabel").pack(side=tk.LEFT, padx=(0, 12))
         self.progress = ttk.Progressbar(
-            progress_frame, 
-            mode='determinate',
-            length=400
+            status_frame, mode="determinate", length=400,
+            style="Business.Horizontal.TProgressbar",
         )
-        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-        
-        # 进度标签
-        self.progress_label = ttk.Label(progress_frame, text="就绪")
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 12))
+        self.progress_label = ttk.Label(status_frame, text="就绪", style="Status.TLabel")
         self.progress_label.pack(side=tk.RIGHT)
-        
-        # 日志区域
-        log_frame = ttk.LabelFrame(main_frame, text="转换日志", padding="10")
+
+        log_frame = ttk.LabelFrame(
+            main_frame, text="转换日志", padding=10, style="Card.TLabelframe"
+        )
         log_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # 日志文本框
         self.log_text = tk.Text(log_frame, height=10, wrap=tk.WORD)
+        style_text_widget(self.log_text)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # 滚动条
-        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        scrollbar = ttk.Scrollbar(
+            log_frame, orient=tk.VERTICAL, command=self.log_text.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
-        
-        # 底部按钮框架
-        bottom_frame = ttk.Frame(main_frame)
-        bottom_frame.pack(fill=tk.X, pady=(15, 0))
-        
-        # 清空日志按钮
-        self.clear_btn = ttk.Button(
-            bottom_frame,
-            text="清空日志",
-            command=self.clear_log
-        )
-        self.clear_btn.pack(side=tk.LEFT, padx=5)
 
-        # 独立的周报合并模块入口，不影响图片转换流程
-        self.weekly_report_btn = ttk.Button(
-            bottom_frame,
-            text="周报合并",
-            command=self.open_weekly_report
+        bottom_frame = ttk.Frame(main_frame, style="App.TFrame")
+        bottom_frame.pack(fill=tk.X, pady=(12, 0))
+        self.clear_btn = ttk.Button(
+            bottom_frame, text="清空日志", command=self.clear_log, style="Ghost.TButton"
         )
-        self.weekly_report_btn.pack(side=tk.LEFT, padx=5)
-        
-        # 退出按钮
+        self.clear_btn.pack(side=tk.LEFT)
         self.quit_btn = ttk.Button(
-            bottom_frame,
-            text="退出",
-            command=self.root.quit
+            bottom_frame, text="退出程序", command=self.root.quit, style="Ghost.TButton"
         )
-        self.quit_btn.pack(side=tk.RIGHT, padx=5)
+        self.quit_btn.pack(side=tk.RIGHT)
         
     def setup_drag_drop(self):
         """设置拖拽功能"""
@@ -237,16 +206,16 @@ class PNGtoJPGConverter:
     def on_drag_enter(self, event):
         """拖拽进入"""
         try:
-            self.drop_frame.config(text="松开鼠标以处理")
-            self.drop_label.config(text="📂\n正在处理...")
+            self.drop_frame.configure(text="松开鼠标开始转换", style="DropActive.TLabelframe")
+            self.drop_label.configure(text="已识别拖拽内容，松开即可处理", style="DropActiveTitle.TLabel")
         except Exception as e:
             print(f"拖拽进入错误: {e}")
         
     def on_drag_leave(self, event):
         """拖拽离开"""
         try:
-            self.drop_frame.config(text="拖拽文件或文件夹到此处")
-            self.drop_label.config(text="📁\n拖拽PNG文件或文件夹到这里\n或")
+            self.drop_frame.configure(text="图片转换", style="Drop.TLabelframe")
+            self.drop_label.configure(text="拖拽 PNG 文件或文件夹到这里", style="DropTitle.TLabel")
         except Exception as e:
             print(f"拖拽离开错误: {e}")
         
@@ -589,6 +558,7 @@ def main():
         print("PNG 转 JPG 转换器启动...")
         print("=" * 60)
         
+        enable_windows_dpi_awareness()
         root = tk.Tk()
         app = PNGtoJPGConverter(root)
         

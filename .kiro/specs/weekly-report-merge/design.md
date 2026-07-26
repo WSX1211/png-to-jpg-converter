@@ -48,3 +48,6 @@
 
 ## Testing Strategy
 执行语法检查和最小合并验证：XLSX 主文件、CSV 追加文件、多行表头、重复财务存列、主行保留及追加行位置。
+
+## Visual Theme
+新增 `ui_theme.py`，使用标准库 Tkinter/ttk 的 `clam` 主题定义统一调色板、中文字体回退、卡片、标题、按钮、输入框、进度条和原生 Text 样式。主窗口和周报子窗口只在构建控件时应用样式，所有事件绑定、实例属性名、线程消息和业务函数保持不变。Windows 在首次创建 Tk 根窗口前启用 DPI awareness，子窗口继承同一 Tcl 主题。

@@ -17,6 +17,8 @@ from typing import Callable, Iterable
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from ui_theme import configure_theme, style_text_widget
+
 
 DEFAULT_BASE_FIELDS = (
     "仓店类型", "办事处", "店铺类别", "仓店名称", "仓店代码", "销售截止日期", "货号",
@@ -466,80 +468,181 @@ class WeeklyReportWindow:
 
     def __init__(self, parent: tk.Misc):
         self.window = tk.Toplevel(parent)
-        self.window.title("周报合并")
-        self.window.geometry("920x760")
-        self.window.minsize(780, 650)
+        configure_theme(self.window)
+        self.window.title("Image Weekly Studio · 周报合并")
+        self.window.geometry("980x820")
+        self.window.minsize(840, 700)
         self.messages: queue.Queue[dict[str, object]] = queue.Queue()
         self.file_vars = {"周报本月": tk.StringVar(), **{role: tk.StringVar() for role in SOURCE_ROLES}}
         self._build_ui()
         self._poll_messages()
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.window, padding=16)
+        container = ttk.Frame(self.window, padding=20, style="App.TFrame")
         container.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(container, text="周报合并", font=("Arial", 18, "bold")).pack(anchor=tk.W)
+        header = ttk.Frame(container, padding=(24, 18), style="Header.TFrame")
+        header.pack(fill=tk.X, pady=(0, 14))
+        header_copy = ttk.Frame(header, style="Header.TFrame")
+        header_copy.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(header_copy, text="周报合并", style="HeaderTitle.TLabel").pack(anchor=tk.W)
         ttk.Label(
-            container,
-            text="主文件完整保留；追加文件按角色扩展指标列，并将数据行追加到主表下方。",
-        ).pack(anchor=tk.W, pady=(2, 10))
+            header_copy,
+            text="按角色纵向追加数据 · 自动识别表头并保留数值格式",
+            style="HeaderSubtitle.TLabel",
+        ).pack(anchor=tk.W, pady=(4, 0))
+        self.merge_button = ttk.Button(
+            header,
+            text="开始合并",
+            command=self._start_merge,
+            style="Header.Primary.TButton",
+        )
+        self.merge_button.pack(side=tk.RIGHT, padx=(18, 0))
 
-        files_frame = ttk.LabelFrame(container, text="文件选择（主文件必选，其他文件可选）", padding=10)
-        files_frame.pack(fill=tk.X)
-        labels = ("周报本月",) + SOURCE_ROLES
-        for row, role in enumerate(labels):
-            label = "主文件（周报本月）" if role == "周报本月" else role
-            ttk.Label(files_frame, text=label, width=18).grid(row=row, column=0, sticky=tk.W, pady=3)
-            ttk.Entry(files_frame, textvariable=self.file_vars[role]).grid(
-                row=row, column=1, sticky=tk.EW, padx=6, pady=3
+        files_frame = ttk.LabelFrame(
+            container,
+            text="01  选择文件",
+            padding=(16, 12),
+            style="Card.TLabelframe",
+        )
+        files_frame.pack(fill=tk.X, pady=(0, 12))
+        ttk.Label(
+            files_frame,
+            text="周报本月为主文件（必选）；同期月、本周、上周、同期周可按需选择。",
+            style="CardText.TLabel",
+        ).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=(0, 7))
+        for row, role in enumerate(("周报本月",) + SOURCE_ROLES, start=1):
+            label = "主文件 · 周报本月" if role == "周报本月" else role
+            ttk.Label(files_frame, text=label, width=18, style="CardText.TLabel").grid(
+                row=row, column=0, sticky=tk.W, pady=3
             )
-            ttk.Button(files_frame, text="选择…", command=lambda r=role: self._choose_file(r)).grid(
-                row=row, column=2, pady=3
-            )
-            ttk.Button(files_frame, text="清除", command=lambda r=role: self.file_vars[r].set("")).grid(
-                row=row, column=3, padx=(5, 0), pady=3
-            )
+            ttk.Entry(
+                files_frame,
+                textvariable=self.file_vars[role],
+                style="Modern.TEntry",
+            ).grid(row=row, column=1, sticky=tk.EW, padx=(6, 8), pady=3)
+            ttk.Button(
+                files_frame,
+                text="选择文件",
+                command=lambda r=role: self._choose_file(r),
+                style="Secondary.TButton",
+            ).grid(row=row, column=2, pady=3)
+            ttk.Button(
+                files_frame,
+                text="清除",
+                command=lambda r=role: self.file_vars[r].set(""),
+                style="Ghost.TButton",
+            ).grid(row=row, column=3, padx=(4, 0), pady=3)
         files_frame.columnconfigure(1, weight=1)
 
-        config_frame = ttk.LabelFrame(container, text="字段配置（每行一个，也支持逗号分隔）", padding=10)
-        config_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-        left = ttk.Frame(config_frame)
-        right = ttk.Frame(config_frame)
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        ttk.Label(left, text="基础字段（默认14个）").pack(anchor=tk.W)
-        self.base_text = tk.Text(left, height=14, wrap=tk.NONE)
-        self.base_text.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(right, text="追加指标（默认5个，可动态增删）").pack(anchor=tk.W)
-        self.metric_text = tk.Text(right, height=14, wrap=tk.NONE)
-        self.metric_text.pack(fill=tk.BOTH, expand=True)
+        config_frame = ttk.LabelFrame(
+            container,
+            text="02  配置字段",
+            padding=(16, 12),
+            style="Card.TLabelframe",
+        )
+        config_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        config_frame.columnconfigure(0, weight=1, uniform="fields")
+        config_frame.columnconfigure(1, weight=1, uniform="fields")
+        config_frame.rowconfigure(1, weight=1)
+
+        ttk.Label(
+            config_frame,
+            text="每行一个字段，也支持逗号分隔；重复同名指标自动读取最后一列。",
+            style="CardText.TLabel",
+        ).grid(row=0, column=0, sticky=tk.W, pady=(0, 7))
+        ttk.Button(
+            config_frame,
+            text="恢复默认字段",
+            command=self._restore_defaults,
+            style="Ghost.TButton",
+        ).grid(row=0, column=1, sticky=tk.E, pady=(0, 7))
+
+        base_panel = ttk.Frame(config_frame, style="Card.TFrame")
+        base_panel.grid(row=1, column=0, sticky=tk.NSEW, padx=(0, 6))
+        base_panel.columnconfigure(0, weight=1)
+        base_panel.rowconfigure(1, weight=1)
+        ttk.Label(base_panel, text="基础字段 · 默认 14 个", style="CardTitle.TLabel").grid(
+            row=0, column=0, sticky=tk.W, pady=(0, 5)
+        )
+        self.base_text = tk.Text(base_panel, height=10, wrap=tk.NONE)
+        style_text_widget(self.base_text)
+        self.base_text.grid(row=1, column=0, sticky=tk.NSEW)
+        base_scrollbar = ttk.Scrollbar(
+            base_panel,
+            orient=tk.VERTICAL,
+            command=self.base_text.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
+        base_scrollbar.grid(row=1, column=1, sticky=tk.NS)
+        self.base_text.configure(yscrollcommand=base_scrollbar.set)
+
+        metric_panel = ttk.Frame(config_frame, style="Card.TFrame")
+        metric_panel.grid(row=1, column=1, sticky=tk.NSEW, padx=(6, 0))
+        metric_panel.columnconfigure(0, weight=1)
+        metric_panel.rowconfigure(1, weight=1)
+        ttk.Label(metric_panel, text="追加指标 · 默认 5 个", style="CardTitle.TLabel").grid(
+            row=0, column=0, sticky=tk.W, pady=(0, 5)
+        )
+        self.metric_text = tk.Text(metric_panel, height=10, wrap=tk.NONE)
+        style_text_widget(self.metric_text)
+        self.metric_text.grid(row=1, column=0, sticky=tk.NSEW)
+        metric_scrollbar = ttk.Scrollbar(
+            metric_panel,
+            orient=tk.VERTICAL,
+            command=self.metric_text.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
+        metric_scrollbar.grid(row=1, column=1, sticky=tk.NS)
+        self.metric_text.configure(yscrollcommand=metric_scrollbar.set)
         self._restore_defaults()
 
-        config_buttons = ttk.Frame(container)
-        config_buttons.pack(fill=tk.X)
-        ttk.Button(config_buttons, text="恢复默认字段", command=self._restore_defaults).pack(side=tk.LEFT)
-        ttk.Label(config_buttons, text="同名指标重复时取最后一列（例如财务存）").pack(side=tk.LEFT, padx=12)
+        status_frame = ttk.Frame(container, padding=(16, 11), style="Card.TFrame")
+        status_frame.pack(fill=tk.X, pady=(0, 12))
+        ttk.Label(status_frame, text="合并进度", style="CardTitle.TLabel").pack(
+            side=tk.LEFT, padx=(0, 12)
+        )
+        self.progress = ttk.Progressbar(
+            status_frame,
+            mode="determinate",
+            style="Business.Horizontal.TProgressbar",
+        )
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 12))
+        self.progress_label = ttk.Label(status_frame, text="就绪", style="Status.TLabel")
+        self.progress_label.pack(side=tk.RIGHT)
 
-        progress_frame = ttk.Frame(container)
-        progress_frame.pack(fill=tk.X, pady=(10, 5))
-        self.progress = ttk.Progressbar(progress_frame, mode="determinate")
-        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.progress_label = ttk.Label(progress_frame, text="就绪", width=12, anchor=tk.E)
-        self.progress_label.pack(side=tk.RIGHT, padx=(8, 0))
-
-        log_frame = ttk.LabelFrame(container, text="处理日志", padding=8)
+        log_frame = ttk.LabelFrame(
+            container,
+            text="03  处理日志",
+            padding=10,
+            style="Card.TLabelframe",
+        )
         log_frame.pack(fill=tk.BOTH, expand=True)
-        self.log_text = tk.Text(log_frame, height=8, wrap=tk.WORD, state=tk.DISABLED)
+        self.log_text = tk.Text(log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED)
+        style_text_widget(self.log_text)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar = ttk.Scrollbar(
+            log_frame,
+            orient=tk.VERTICAL,
+            command=self.log_text.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
-        actions = ttk.Frame(container)
-        actions.pack(fill=tk.X, before=files_frame, pady=(0, 10))
-        self.merge_button = ttk.Button(actions, text="开始合并", command=self._start_merge)
-        self.merge_button.pack(side=tk.RIGHT)
-        ttk.Button(actions, text="关闭", command=self.window.destroy).pack(side=tk.RIGHT, padx=8)
+        footer = ttk.Frame(container, style="App.TFrame")
+        footer.pack(fill=tk.X, pady=(10, 0))
+        ttk.Label(
+            footer,
+            text="输出始终保存为新的 XLSX 文件，不会覆盖输入文件。",
+            style="Muted.TLabel",
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            footer,
+            text="关闭窗口",
+            command=self.window.destroy,
+            style="Ghost.TButton",
+        ).pack(side=tk.RIGHT)
 
     def _choose_file(self, role: str) -> None:
         path = filedialog.askopenfilename(
