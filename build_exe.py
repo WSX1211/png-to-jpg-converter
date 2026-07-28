@@ -32,6 +32,7 @@ def build_exe():
         "--clean",
         "--noconfirm",
         "--hidden-import=weekly_report",
+        "--hidden-import=analysis_template",
         "--collect-all=openpyxl",
         "--collect-all=xlrd",
     ]
@@ -54,6 +55,7 @@ def build_exe():
         print("1. PNG 单张、多张或文件夹批量转 JPG")
         print("2. XLSX、XLS、CSV 周报合并")
         print("3. 周报基础字段和追加指标可动态配置")
+        print("4. XLSX、XLS 原始数据生成经营分析模板")
     except Exception as error:
         print(f"\n✗ 打包失败: {error}")
         raise

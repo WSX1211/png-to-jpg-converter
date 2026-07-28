@@ -30,6 +30,7 @@ class PNGtoJPGConverter:
         # 初始化变量
         self.use_tkdnd = False
         self.weekly_report_window = None
+        self.analysis_template_window = None
         
         try:
             self.setup_ui()
@@ -133,6 +134,11 @@ class PNGtoJPGConverter:
             width=15, style="Dark.TButton",
         )
         self.weekly_report_top_btn.pack(side=tk.LEFT, padx=5)
+        self.analysis_template_btn = ttk.Button(
+            button_frame, text="经营分析模板", command=self.open_analysis_template,
+            width=15, style="Dark.TButton",
+        )
+        self.analysis_template_btn.pack(side=tk.LEFT, padx=5)
 
         status_frame = ttk.Frame(main_frame, padding=(16, 12), style="Card.TFrame")
         status_frame.pack(fill=tk.X, pady=(0, 14))
@@ -525,6 +531,21 @@ class PNGtoJPGConverter:
             self.weekly_report_window = WeeklyReportWindow(self.root)
         except Exception as e:
             messagebox.showerror("错误", f"无法打开周报合并模块:\n{str(e)}")
+
+    def open_analysis_template(self):
+        """打开单实例经营分析模板窗口。"""
+        try:
+            if self.analysis_template_window is not None:
+                window = self.analysis_template_window.window
+                if window.winfo_exists():
+                    window.deiconify()
+                    window.lift()
+                    window.focus_force()
+                    return
+            from analysis_template import AnalysisTemplateWindow
+            self.analysis_template_window = AnalysisTemplateWindow(self.root)
+        except Exception as e:
+            messagebox.showerror("错误", f"无法打开经营分析模板模块:\n{str(e)}")
 
     def clear_log(self):
         """清空日志"""
